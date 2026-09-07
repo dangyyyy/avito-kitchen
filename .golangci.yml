@@ -26,6 +26,13 @@ linters:
     govet:
       enable:
         - shadow
+    revive:
+      rules:
+        # Doc comments on every exported symbol are noise in an application.
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
   exclusions:
     rules:
       # Test code may skip context plumbing and use weaker randomness.
