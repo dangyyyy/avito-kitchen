@@ -51,3 +51,12 @@ type RestaurantFilter struct {
 	Limit    int
 	Offset   int
 }
+
+// MenuItemSearchResult answers "who sells this dish", so it carries enough of the
+// restaurant to render a search hit without a second request.
+type MenuItemSearchResult struct {
+	Item              MenuItem
+	RestaurantName    string
+	RestaurantCity    string
+	IsAcceptingOrders bool
+}
