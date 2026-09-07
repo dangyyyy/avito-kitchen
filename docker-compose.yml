@@ -1,0 +1,69 @@
+name: avito-kitchen
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kitchen
+      POSTGRES_PASSWORD: kitchen
+      POSTGRES_DB: kitchen
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitchen -d kitchen"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  migrator:
+    build:
+      context: .
+      dockerfile: build/migrate.Dockerfile
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: postgres://kitchen:kitchen@postgres:5432/kitchen?sslmode=disable
+      GOOSE_MIGRATION_DIR: /migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: api
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_DSN: postgres://kitchen:kitchen@postgres:5432/kitchen?sslmode=disable
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+
+  restaurant:
+    build:
+      context: .
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: restaurant
+    environment:
+      HTTP_ADDR: ":8081"
+      PLATFORM_URL: http://api:8080
+      RESTAURANT_API_KEY: demo-restaurant-key
+      POLL_INTERVAL: 5s
+      LOG_LEVEL: info
+    ports:
+      - "8081:8081"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata:
