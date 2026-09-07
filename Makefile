@@ -1,4 +1,5 @@
 BINARY_DIR := bin
+COMPOSE := docker compose
 
 .DEFAULT_GOAL := help
 
@@ -27,6 +28,34 @@ lint: ## Run static analysis
 .PHONY: test
 test: ## Run tests with the race detector
 	go test ./... -race -count=1
+
+.PHONY: up
+up: ## Start the whole stack
+	$(COMPOSE) up -d --build
+
+.PHONY: down
+down: ## Stop the stack and remove volumes
+	$(COMPOSE) down -v
+
+.PHONY: ps
+ps: ## Show running containers
+	$(COMPOSE) ps
+
+.PHONY: logs
+logs: ## Follow service logs
+	$(COMPOSE) logs -f api restaurant
+
+.PHONY: migrate-up
+migrate-up: ## Apply database migrations
+	$(COMPOSE) run --rm migrator up
+
+.PHONY: migrate-down
+migrate-down: ## Roll back the last migration
+	$(COMPOSE) run --rm migrator down
+
+.PHONY: migrate-status
+migrate-status: ## Show migration status
+	$(COMPOSE) run --rm migrator status
 
 .PHONY: clean
 clean: ## Remove build artifacts
