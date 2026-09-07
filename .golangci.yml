@@ -1,0 +1,44 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    # Resource leaks — critical for a service that talks to HTTP and SQL.
+    - bodyclose
+    - sqlclosecheck
+    - rowserrcheck
+    - noctx
+    # Error handling correctness.
+    - errorlint
+    - nilerr
+    # General correctness and style.
+    - gocritic
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable:
+        - shadow
+  exclusions:
+    rules:
+      # Test code may skip context plumbing and use weaker randomness.
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/dangyyyy/avito-kitchen
