@@ -60,12 +60,17 @@ func (s *ClientService) GetMenu(
 		byCategory[item.CategoryID] = append(byCategory[item.CategoryID], item)
 	}
 
+	// A menu sync deactivates items but leaves the category row behind, so skip
+	// categories that ended up with nothing in them.
 	menu := make([]domain.MenuCategoryWithItems, 0, len(categories))
+
 	for _, category := range categories {
-		menu = append(menu, domain.MenuCategoryWithItems{
-			Category: category,
-			Items:    byCategory[category.ID],
-		})
+		items := byCategory[category.ID]
+		if len(items) == 0 {
+			continue
+		}
+
+		menu = append(menu, domain.MenuCategoryWithItems{Category: category, Items: items})
 	}
 
 	return menu, nil
