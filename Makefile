@@ -18,8 +18,9 @@ build: ## Build both services into ./bin
 	go build -o $(BINARY_DIR)/restaurant ./cmd/restaurant
 
 .PHONY: generate
-generate: ## Regenerate API code from the OpenAPI spec
+generate: ## Regenerate API code from the OpenAPI specs
 	go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
+	go tool oapi-codegen -config api/oapi-codegen-partner.yaml api/partner-openapi.yaml
 
 .PHONY: fmt
 fmt: ## Format source code
