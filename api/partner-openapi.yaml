@@ -1,0 +1,342 @@
+openapi: 3.0.3
+
+info:
+  title: Авито.Кухня — партнёрское API
+  version: 1.0.0
+  description: |
+    Закрытое API для заведений, размещённых на площадке. Доступ по ключу в
+    заголовке `X-Api-Key`; в базе хранится только SHA-256 хеш ключа.
+    Самостоятельной регистрации нет — ключи выдаются площадкой.
+
+    Заведение работает в своих идентификаторах: позиции и категории меню
+    адресуются полем `external_id` из учётной системы заведения. Площадка
+    сопоставляет их со своими id и возвращает оба в заказе.
+
+    Заказы заведение забирает опросом `GET /partner/orders?status=created`.
+    Механизм самовосстанавливающийся: состояние хранится в статусе заказа, а не
+    в очереди, поэтому упавший сервис ничего не теряет.
+
+servers:
+  - url: http://localhost:8080
+    description: Локальный запуск через Docker Compose
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: menu
+    description: Меню и стоп-лист
+  - name: orders
+    description: Очередь заказов и их статусы
+
+paths:
+  /partner/me:
+    get:
+      tags: [menu]
+      summary: Профиль своего заведения
+      description: Позволяет сервису заведения узнать свой id на площадке, не зашивая его в конфиг.
+      operationId: getProfile
+      responses:
+        '200':
+          description: Заведение
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerRestaurant' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /partner/settings:
+    put:
+      tags: [menu]
+      summary: Открыть или закрыть приём заказов
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_accepting_orders]
+              properties:
+                is_accepting_orders: { type: boolean }
+      responses:
+        '200':
+          description: Обновлённое заведение
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerRestaurant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /partner/menu:
+    put:
+      tags: [menu]
+      summary: Синхронизировать меню целиком
+      description: |
+        Идемпотентная операция: присылается полное меню, площадка делает upsert
+        по паре `(заведение, external_id)`. Позиции, которых нет в присланном
+        списке, деактивируются, а не удаляются — на них могут ссылаться прошлые
+        заказы.
+      operationId: syncMenu
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MenuSync' }
+      responses:
+        '200':
+          description: Итог синхронизации
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MenuSyncResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /partner/menu/items/{externalId}/availability:
+    put:
+      tags: [menu]
+      summary: Отправить позицию в стоп-лист или вернуть из него
+      operationId: setItemAvailability
+      parameters:
+        - name: externalId
+          in: path
+          required: true
+          description: Идентификатор позиции в учётной системе заведения
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_available]
+              properties:
+                is_available: { type: boolean }
+      responses:
+        '204': { description: Доступность обновлена }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /partner/orders:
+    get:
+      tags: [orders]
+      summary: Очередь заказов
+      description: Без параметра `status` возвращает все заказы заведения, свежие первыми.
+      operationId: listPartnerOrders
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/PartnerOrderStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Заказы
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/PartnerOrder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /partner/orders/{orderId}/accept:
+    post:
+      tags: [orders]
+      summary: Принять заказ
+      operationId: acceptOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200': { $ref: '#/components/responses/PartnerOrderResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /partner/orders/{orderId}/reject:
+    post:
+      tags: [orders]
+      summary: Отклонить заказ
+      operationId: rejectOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/PartnerOrderResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /partner/orders/{orderId}/status:
+    put:
+      tags: [orders]
+      summary: Продвинуть заказ по статусам
+      description: |
+        Допустимые переходы задаются машиной состояний на стороне площадки:
+        `accepted → cooking → ready → delivering → delivered`. Попытка
+        перепрыгнуть статус или вернуться назад отклоняется с 409.
+      operationId: advanceOrderStatus
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/PartnerOrderStatus' }
+      responses:
+        '200': { $ref: '#/components/responses/PartnerOrderResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Ключ отсутствует или неизвестен
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Объект не найден или принадлежит другому заведению
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Переход по статусу запрещён машиной состояний
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PartnerOrderResponse:
+      description: Обновлённый заказ
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/PartnerOrder' }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [bad_request, unauthorized, not_found, conflict, internal_error]
+        message: { type: string }
+
+    PartnerRestaurant:
+      type: object
+      required: [id, name, is_accepting_orders]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        is_accepting_orders: { type: boolean }
+
+    MenuSyncItem:
+      type: object
+      required: [external_id, name, price_cents]
+      properties:
+        external_id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        price_cents: { type: integer, format: int64, minimum: 1 }
+        is_available: { type: boolean, default: true }
+
+    MenuSyncCategory:
+      type: object
+      required: [external_id, name, items]
+      properties:
+        external_id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        position: { type: integer, default: 0 }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MenuSyncItem' }
+
+    MenuSync:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/MenuSyncCategory' }
+
+    MenuSyncResult:
+      type: object
+      required: [categories, items_upserted, items_deactivated]
+      properties:
+        categories: { type: integer }
+        items_upserted: { type: integer }
+        items_deactivated:
+          type: integer
+          description: Позиции, пропавшие из присланного меню
+
+    PartnerOrderStatus:
+      type: string
+      enum: [created, accepted, cooking, ready, delivering, delivered, rejected, cancelled]
+
+    PartnerOrderItem:
+      type: object
+      required: [menu_item_id, external_item_id, name, price_cents, quantity]
+      properties:
+        menu_item_id:
+          type: string
+          format: uuid
+          description: Идентификатор позиции на площадке
+        external_item_id:
+          type: string
+          description: Идентификатор позиции в учётной системе заведения
+        name: { type: string }
+        price_cents: { type: integer, format: int64 }
+        quantity: { type: integer }
+
+    PartnerOrder:
+      type: object
+      required: [id, status, total_price_cents, delivery_address, customer_phone, items, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/PartnerOrderStatus' }
+        total_price_cents: { type: integer, format: int64 }
+        delivery_address: { type: string }
+        customer_phone: { type: string }
+        comment: { type: string }
+        rejection_reason: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PartnerOrderItem' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

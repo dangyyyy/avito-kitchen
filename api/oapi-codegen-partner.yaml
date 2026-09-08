@@ -1,0 +1,7 @@
+package: partnerapi
+output: internal/platform/transport/partnerapi/api.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true
+  embedded-spec: true
