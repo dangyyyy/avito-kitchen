@@ -1,0 +1,7 @@
+package: clientapi
+output: internal/platform/transport/clientapi/api.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true
+  embedded-spec: true

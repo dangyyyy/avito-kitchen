@@ -1,0 +1,438 @@
+openapi: 3.0.3
+
+info:
+  title: Авито.Кухня — клиентское API
+  version: 1.0.0
+  description: |
+    API клиентской части: поиск заведений и блюд, проверка корзины, оформление
+    и отслеживание заказов.
+
+    Аутентификация вне скоупа MVP по условию задания. Пользователь передаётся
+    заголовком `X-User-Id`, которому сервер доверяет. Это единственная точка,
+    которую придётся заменить при внедрении JWT — контракты хендлеров при этом
+    не меняются.
+
+    Все денежные суммы — целое число копеек. Дробные типы для денег не
+    используются намеренно.
+
+servers:
+  - url: http://localhost:8080
+    description: Локальный запуск через Docker Compose
+
+tags:
+  - name: restaurants
+    description: Поиск заведений и просмотр меню
+  - name: orders
+    description: Оформление и отслеживание заказов
+
+paths:
+  /restaurants:
+    get:
+      tags: [restaurants]
+      summary: Список заведений
+      operationId: listRestaurants
+      parameters:
+        - { name: city, in: query, schema: { type: string } }
+        - { name: cuisine, in: query, schema: { type: string } }
+        - name: open_only
+          in: query
+          description: Только заведения, принимающие заказы прямо сейчас
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Список заведений
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Restaurant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /restaurants/{restaurantId}:
+    get:
+      tags: [restaurants]
+      summary: Карточка заведения
+      operationId: getRestaurant
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+      responses:
+        '200':
+          description: Заведение
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Restaurant' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /restaurants/{restaurantId}/menu:
+    get:
+      tags: [restaurants]
+      summary: Меню заведения
+      description: Категории с позициями. Позиции в стоп-листе отдаются с `is_available=false`, а не скрываются, чтобы клиент мог показать их неактивными.
+      operationId: getMenu
+      parameters:
+        - $ref: '#/components/parameters/RestaurantId'
+      responses:
+        '200':
+          description: Меню
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Menu' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /menu/search:
+    get:
+      tags: [restaurants]
+      summary: Поиск блюда по всем заведениям
+      description: Отвечает на вопрос «где есть это блюдо», а не «что есть в этом заведении».
+      operationId: searchMenuItems
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string, minLength: 2 }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Найденные блюда
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/MenuSearchHit' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /cart/validate:
+    post:
+      tags: [orders]
+      summary: Проверить корзину до оформления
+      description: |
+        Прогоняет ту же валидацию, что и оформление заказа, но ничего не создаёт.
+        Позволяет узнать о подорожавшей или снятой позиции заранее.
+      operationId: validateCart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CartRequest' }
+      responses:
+        '200':
+          description: Результат проверки. Корзина может быть невалидной — это не ошибка запроса.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CartValidation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders:
+    post:
+      tags: [orders]
+      summary: Оформить заказ
+      operationId: placeOrder
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          description: Повторный запрос с тем же ключом вернёт тот же заказ, а не создаст новый.
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlaceOrderRequest' }
+      responses:
+        '201':
+          description: Заказ создан. Повторный запрос с тем же ключом идемпотентности возвращает тот же заказ с этим же кодом.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Заказ оформить нельзя — заведение закрыто либо позиции недоступны или изменились в цене.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CartConflict' }
+    get:
+      tags: [orders]
+      summary: Мои заказы
+      operationId: listOrders
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Заказы пользователя, свежие первыми
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /orders/{orderId}:
+    get:
+      tags: [orders]
+      summary: Статус заказа
+      operationId: getOrder
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Заказ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders/{orderId}/cancel:
+    post:
+      tags: [orders]
+      summary: Отменить заказ
+      description: Отмена возможна, пока заведение не приняло заказ.
+      operationId: cancelOrder
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Заказ отменён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Заказ уже принят заведением или находится в терминальном статусе
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  parameters:
+    RestaurantId:
+      name: restaurantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserId:
+      name: X-User-Id
+      in: header
+      required: true
+      description: Заглушка аутентификации. При внедрении JWT заменяется на разбор токена.
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Объект не найден
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [bad_request, not_found, conflict, restaurant_closed, cart_invalid, internal_error]
+        message: { type: string }
+
+    Restaurant:
+      type: object
+      required: [id, name, city, address, cuisine_type, is_accepting_orders]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        city: { type: string }
+        address: { type: string }
+        cuisine_type: { type: string }
+        is_accepting_orders:
+          type: boolean
+          description: Принимает ли заведение заказы прямо сейчас
+
+    MenuItem:
+      type: object
+      required: [id, name, price_cents, is_available]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        price_cents: { type: integer, format: int64 }
+        is_available:
+          type: boolean
+          description: false означает стоп-лист — позиция временно недоступна
+
+    MenuCategory:
+      type: object
+      required: [id, name, items]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MenuItem' }
+
+    Menu:
+      type: object
+      required: [restaurant_id, categories]
+      properties:
+        restaurant_id: { type: string, format: uuid }
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/MenuCategory' }
+
+    MenuSearchHit:
+      type: object
+      required: [item, restaurant_id, restaurant_name, restaurant_city, is_accepting_orders]
+      properties:
+        item: { $ref: '#/components/schemas/MenuItem' }
+        restaurant_id: { type: string, format: uuid }
+        restaurant_name: { type: string }
+        restaurant_city: { type: string }
+        is_accepting_orders: { type: boolean }
+
+    CartItem:
+      type: object
+      required: [menu_item_id, quantity]
+      properties:
+        menu_item_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1, maximum: 100 }
+        expected_price_cents:
+          type: integer
+          format: int64
+          description: |
+            Цена, которую видел клиент. Если она разошлась с текущей, заказ не
+            оформляется. Опущенное поле означает согласие на актуальную цену.
+
+    CartRequest:
+      type: object
+      required: [restaurant_id, items]
+      properties:
+        restaurant_id: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/CartItem' }
+
+    ItemProblem:
+      type: object
+      required: [menu_item_id, reason]
+      properties:
+        menu_item_id: { type: string, format: uuid }
+        name: { type: string }
+        reason:
+          type: string
+          enum: [not_found, unavailable, price_changed]
+        expected_price_cents: { type: integer, format: int64 }
+        actual_price_cents: { type: integer, format: int64 }
+
+    CartValidation:
+      type: object
+      required: [valid, total_price_cents, problems]
+      properties:
+        valid: { type: boolean }
+        total_price_cents:
+          type: integer
+          format: int64
+          description: Сумма по актуальным ценам. Осмысленна только при valid=true.
+        problems:
+          type: array
+          items: { $ref: '#/components/schemas/ItemProblem' }
+
+    CartConflict:
+      type: object
+      required: [code, message, problems]
+      properties:
+        code:
+          type: string
+          enum: [cart_invalid, restaurant_closed]
+        message: { type: string }
+        problems:
+          type: array
+          items: { $ref: '#/components/schemas/ItemProblem' }
+
+    PlaceOrderRequest:
+      allOf:
+        - $ref: '#/components/schemas/CartRequest'
+        - type: object
+          required: [delivery_address, customer_phone]
+          properties:
+            delivery_address: { type: string, minLength: 1 }
+            customer_phone: { type: string, minLength: 1 }
+            comment: { type: string }
+
+    OrderItem:
+      type: object
+      required: [name, price_cents, quantity]
+      properties:
+        menu_item_id: { type: string, format: uuid }
+        name:
+          type: string
+          description: Снапшот названия на момент заказа
+        price_cents:
+          type: integer
+          format: int64
+          description: Снапшот цены на момент заказа
+        quantity: { type: integer }
+
+    OrderStatus:
+      type: string
+      enum: [created, accepted, cooking, ready, delivering, delivered, rejected, cancelled]
+
+    Order:
+      type: object
+      required:
+        [id, restaurant_id, status, total_price_cents, delivery_address, customer_phone, items, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        restaurant_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        total_price_cents: { type: integer, format: int64 }
+        delivery_address: { type: string }
+        customer_phone: { type: string }
+        comment: { type: string }
+        rejection_reason:
+          type: string
+          description: Заполняется, когда заведение отклонило заказ
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OrderItem' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
