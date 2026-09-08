@@ -26,7 +26,7 @@ generate: ## Regenerate API code from the OpenAPI specs
 .PHONY: diagrams
 diagrams: ## Render docs/diagrams/*.puml to SVG
 	docker run --rm -v "$(CURDIR)/docs/diagrams:/data" plantuml/plantuml \
-		-tsvg -charset UTF-8 "/data/*.puml"
+		-tpng -charset UTF-8 "/data/*.puml"
 
 .PHONY: fmt
 fmt: ## Format source code
