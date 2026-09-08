@@ -25,6 +25,10 @@ services:
       GOOSE_DRIVER: postgres
       GOOSE_DBSTRING: postgres://kitchen:kitchen@postgres:5432/kitchen?sslmode=disable
       GOOSE_MIGRATION_DIR: /migrations
+    # The image bakes the migrations in so it can run standalone, but mounting
+    # the directory means a new migration does not need an image rebuild.
+    volumes:
+      - ./migrations:/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
