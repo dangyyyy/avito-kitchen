@@ -21,6 +21,7 @@ build: ## Build both services into ./bin
 generate: ## Regenerate API code from the OpenAPI specs
 	go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
 	go tool oapi-codegen -config api/oapi-codegen-partner.yaml api/partner-openapi.yaml
+	go tool oapi-codegen -config api/oapi-codegen-partner-client.yaml api/partner-openapi.yaml
 
 .PHONY: fmt
 fmt: ## Format source code

@@ -1,0 +1,5 @@
+package: partnerclient
+output: internal/restaurant/partnerclient/client.gen.go
+generate:
+  models: true
+  client: true
