@@ -38,7 +38,14 @@ func newRouter(pool *pgxpool.Pool) http.Handler {
 		},
 	)
 
-	clientapi.HandlerFromMux(strict, r)
+	// ErrorHandlerFunc has to be set here as well, not only on the strict handler:
+	// parameter decoding fails inside the chi wrapper, before the strict layer is
+	// reached. Without it a malformed UUID answers with plain text instead of the
+	// error envelope the spec promises.
+	clientapi.HandlerWithOptions(strict, clientapi.ChiServerOptions{
+		BaseRouter:       r,
+		ErrorHandlerFunc: writeRequestError,
+	})
 
 	return r
 }
