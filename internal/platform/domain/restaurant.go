@@ -52,6 +52,29 @@ type RestaurantFilter struct {
 	Offset   int
 }
 
+// MenuSyncItem and MenuSyncCategory describe the menu as the restaurant sends
+// it: addressed entirely by the venue's own identifiers.
+type MenuSyncItem struct {
+	ExternalID  string
+	Name        string
+	Description string
+	PriceCents  int64
+	IsAvailable bool
+}
+
+type MenuSyncCategory struct {
+	ExternalID string
+	Name       string
+	Position   int
+	Items      []MenuSyncItem
+}
+
+type MenuSyncResult struct {
+	Categories       int
+	ItemsUpserted    int
+	ItemsDeactivated int
+}
+
 // MenuCategoryWithItems is the menu as a client renders it: categories in order,
 // each with its own positions.
 type MenuCategoryWithItems struct {
