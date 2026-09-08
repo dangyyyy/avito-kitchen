@@ -1,0 +1,45 @@
+@startuml c4-component
+!include <C4/C4_Component>
+
+title API платформы — C4 Level 3, компоненты
+
+Person(customer, "Пользователь")
+System_Ext(restaurant, "Сервис заведения")
+
+Container_Boundary(api, "API платформы") {
+    Component(clientapi, "clientapi", "Go, сгенерирован из OpenAPI", "Хендлеры клиентского API, единый формат ошибок")
+    Component(partnerapi, "partnerapi", "Go, сгенерирован из OpenAPI", "Хендлеры партнёрского API")
+    Component(auth, "Авторизация партнёров", "Go, middleware", "Находит заведение по SHA-256 хешу ключа и кладёт в контекст")
+
+    Component(clientsvc, "ClientService", "Go", "Сборка меню, поиск, оформление и отслеживание заказов")
+    Component(partnersvc, "PartnerService", "Go", "Синхронизация меню, стоп-лист, очередь и статусы заказов")
+
+    Component(domain, "domain", "Go", "Сущности, машина состояний заказа, типизированные ошибки")
+    Component(repo, "repository", "Go, pgx", "SQL. Транзакция оформления с блокировкой строк меню")
+}
+
+ContainerDb(db, "PostgreSQL", "PostgreSQL 17")
+
+Rel(customer, clientapi, "HTTP/JSON")
+Rel(restaurant, auth, "HTTP/JSON, X-Api-Key")
+Rel(auth, partnerapi, "Передаёт заведение в контексте")
+
+Rel(clientapi, clientsvc, "")
+Rel(partnerapi, partnersvc, "")
+
+Rel(clientsvc, repo, "")
+Rel(partnersvc, repo, "")
+Rel(clientsvc, domain, "")
+Rel(partnersvc, domain, "")
+Rel(repo, domain, "Спрашивает о допустимости перехода")
+Rel(repo, db, "SQL")
+
+note right of repo
+  Оформление заказа блокирует
+  строки меню FOR UPDATE, поэтому
+  позиция не может уйти в стоп-лист
+  между проверкой и вставкой.
+end note
+
+SHOW_LEGEND()
+@enduml

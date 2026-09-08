@@ -23,6 +23,11 @@ generate: ## Regenerate API code from the OpenAPI specs
 	go tool oapi-codegen -config api/oapi-codegen-partner.yaml api/partner-openapi.yaml
 	go tool oapi-codegen -config api/oapi-codegen-partner-client.yaml api/partner-openapi.yaml
 
+.PHONY: diagrams
+diagrams: ## Render docs/diagrams/*.puml to SVG
+	docker run --rm -v "$(CURDIR)/docs/diagrams:/data" plantuml/plantuml \
+		-tsvg -charset UTF-8 "/data/*.puml"
+
 .PHONY: fmt
 fmt: ## Format source code
 	golangci-lint fmt ./...

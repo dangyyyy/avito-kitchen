@@ -1,0 +1,118 @@
+@startuml er
+title Схема базы данных
+
+hide circle
+skinparam linetype ortho
+skinparam roundcorner 4
+
+entity "restaurants" as restaurants {
+  * id : UUID <<PK>>
+  --
+  * name : TEXT
+  * city : TEXT
+  * address : TEXT
+  cuisine_type : TEXT
+  * is_accepting_orders : BOOLEAN
+  * api_key_hash : TEXT <<UQ>>
+  * created_at, updated_at : TIMESTAMPTZ
+}
+
+entity "menu_categories" as categories {
+  * id : UUID <<PK>>
+  --
+  * restaurant_id : UUID <<FK>>
+  * external_id : TEXT
+  * name : TEXT
+  position : INTEGER
+  ..
+  UNIQUE (restaurant_id, external_id)
+}
+
+entity "menu_items" as items {
+  * id : UUID <<PK>>
+  --
+  * restaurant_id : UUID <<FK>>
+  * category_id : UUID <<FK>>
+  * external_id : TEXT
+  * name : TEXT
+  description : TEXT
+  * price_cents : BIGINT
+  * is_available : BOOLEAN
+  * is_active : BOOLEAN
+  ..
+  UNIQUE (restaurant_id, external_id)
+  GIN (name gin_trgm_ops)
+}
+
+entity "users" as users {
+  * id : UUID <<PK>>
+  --
+  * name : TEXT
+  * phone : TEXT
+}
+
+entity "orders" as orders {
+  * id : UUID <<PK>>
+  --
+  * restaurant_id : UUID <<FK>>
+  * user_id : UUID <<FK>>
+  * status : TEXT <<CHECK>>
+  * total_price_cents : BIGINT
+  * delivery_address : TEXT
+  * customer_phone : TEXT
+  comment : TEXT
+  rejection_reason : TEXT
+  * idempotency_key : TEXT
+  ..
+  UNIQUE (user_id, idempotency_key)
+  INDEX (restaurant_id, status)
+  INDEX (user_id, created_at DESC)
+}
+
+entity "order_items" as order_items {
+  * id : UUID <<PK>>
+  --
+  * order_id : UUID <<FK>>
+  menu_item_id : UUID <<FK, NULL>>
+  * external_item_id : TEXT
+  * name : TEXT
+  * price_cents : BIGINT
+  * quantity : INTEGER
+}
+
+entity "order_status_history" as history {
+  * id : BIGSERIAL <<PK>>
+  --
+  * order_id : UUID <<FK>>
+  from_status : TEXT
+  * to_status : TEXT
+  * changed_by : TEXT <<CHECK>>
+  * created_at : TIMESTAMPTZ
+}
+
+restaurants ||--o{ categories
+restaurants ||--o{ items
+restaurants ||--o{ orders
+categories  ||--o{ items
+users       ||--o{ orders
+orders      ||--|{ order_items
+orders      ||--o{ history
+items       |o..o{ order_items
+
+note bottom of order_items
+  name и price_cents — снапшот на момент заказа,
+  а не ссылка на актуальную позицию меню.
+  Поэтому переоценка меню не меняет сумму
+  уже оформленного заказа, а menu_item_id
+  остаётся только для аналитики.
+end note
+
+note bottom of items
+  is_available — временный стоп-лист.
+  is_active — позиция пропала из меню
+  при синхронизации. Схлопнуть в один флаг
+  нельзя: прошлые заказы ссылаются
+  на снятые позиции.
+end note
+
+@enduml

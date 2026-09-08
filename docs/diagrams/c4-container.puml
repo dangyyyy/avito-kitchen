@@ -1,0 +1,34 @@
+@startuml c4-container
+!include <C4/C4_Container>
+
+title Авито.Кухня — C4 Level 2, контейнеры
+
+Person(customer, "Пользователь", "Ищет блюда и заказывает доставку")
+Person(staff, "Сотрудник заведения", "Работает через учётную систему ресторана")
+
+System_Boundary(platform, "Авито.Кухня") {
+    Container(api, "API платформы", "Go, chi", "Клиентское и партнёрское API. Валидация корзины, оформление заказов, машина состояний")
+    ContainerDb(db, "PostgreSQL", "PostgreSQL 17", "Заведения, меню, заказы, история статусов")
+    Container(swagger, "Swagger UI", "nginx", "Отдаёт обе OpenAPI спецификации")
+}
+
+System_Boundary(venue, "Заведение") {
+    Container(restaurant, "Сервис заведения", "Go", "Публикует меню, опрашивает очередь заказов, ведёт их по статусам")
+}
+
+Rel(customer, api, "Ищет заведения и блюда, оформляет и отслеживает заказы", "HTTPS/JSON")
+Rel(staff, restaurant, "Управляет стоп-листом и приёмом заказов", "HTTPS/JSON")
+
+Rel(restaurant, api, "Синхронизирует меню, забирает заказы, двигает статусы", "HTTPS/JSON, X-Api-Key")
+Rel(api, db, "Читает и пишет", "pgx, SQL")
+Rel(customer, swagger, "Читает спецификации", "HTTPS")
+
+note right of restaurant
+  Опрос, а не вебхуки: состояние
+  доставки хранится в статусе заказа,
+  поэтому упавший сервис ничего
+  не теряет и догоняет очередь сам.
+end note
+
+SHOW_LEGEND()
+@enduml

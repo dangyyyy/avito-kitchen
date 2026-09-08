@@ -1,0 +1,73 @@
+@startuml cjm-restaurant
+title CJM заведения — от подключения до выдачи заказа
+
+start
+
+:Площадка выдаёт API-ключ;
+note right
+  Самостоятельной регистрации нет.
+  В базе хранится только SHA-256 хеш ключа.
+end note
+
+:Сервис заведения стартует;
+
+repeat
+  :Пробует связаться с площадкой
+  **GET /partner/me**;
+  backward :Ждёт две секунды;
+repeat while (Площадка отвечает?) is (нет) not (да)
+
+:Публикует полное меню
+**PUT /partner/menu**;
+note right
+  Идемпотентно: upsert по паре
+  (заведение, external_id). Пропавшие
+  позиции деактивируются, а не удаляются —
+  на них ссылаются прошлые заказы.
+end note
+
+:Открывает приём заказов
+**PUT /partner/settings**;
+
+repeat
+  :Опрос раз в 5 секунд;
+
+  :Забирает заказы в работе
+  **GET /partner/orders**;
+  :Двигает каждый на один шаг
+  **PUT /partner/orders/{id}/status**;
+  note right
+    accepted, cooking, ready,
+    delivering, delivered.
+    Пропустить статус нельзя: 409.
+  end note
+
+  :Забирает новые заказы
+  **GET /partner/orders?status=created**;
+
+  switch (Что делать с заказом)
+  case (Может приготовить)
+    :Принимает
+    **POST /partner/orders/{id}/accept**;
+  case (Кончились продукты)
+    :Отклоняет с причиной
+    **POST /partner/orders/{id}/reject**;
+    :Пользователь видит статус
+    rejected и причину;
+  case (Позиция закончилась)
+    :Отправляет в стоп-лист
+    **PUT /partner/menu/items/{externalId}/availability**;
+    :Пользователь видит позицию
+    недоступной и не может её заказать;
+  case (Смена закончилась)
+    :Закрывает приём
+    **PUT /partner/settings**;
+    :Новые заказы отклоняются
+    с 409 restaurant_closed;
+  endswitch
+
+repeat while (Сервис работает?) is (да) not (нет)
+
+stop
+
+@enduml
