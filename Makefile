@@ -48,6 +48,10 @@ up: ## Start the whole stack
 down: ## Stop the stack and remove volumes
 	$(COMPOSE) down -v
 
+.PHONY: demo
+demo: ## Walk through every business scenario against the running stack
+	./scripts/demo.sh
+
 .PHONY: ps
 ps: ## Show running containers
 	$(COMPOSE) ps
