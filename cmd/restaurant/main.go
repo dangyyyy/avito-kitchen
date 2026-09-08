@@ -10,11 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/dangyyyy/avito-kitchen/internal/pkg/config"
 	"github.com/dangyyyy/avito-kitchen/internal/pkg/logger"
+	"github.com/dangyyyy/avito-kitchen/internal/restaurant"
+	"github.com/dangyyyy/avito-kitchen/internal/restaurant/partnerclient"
 )
 
 func main() {
@@ -35,29 +34,49 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	client, err := partnerclient.NewClientWithResponses(
+		cfg.PlatformURL,
+		partnerclient.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
+			req.Header.Set("X-Api-Key", cfg.APIKey)
+
+			return nil
+		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	kitchen := restaurant.NewKitchen(client, cfg.PollInterval)
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           newRouter(),
+		Handler:           restaurant.NewControlRouter(kitchen),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	serverErr := make(chan error, 1)
 
 	go func() {
-		slog.Info("restaurant service listening",
-			"addr", cfg.HTTPAddr,
-			"platform", cfg.PlatformURL,
-			"poll_interval", cfg.PollInterval,
-		)
+		slog.Info("restaurant control api listening", "addr", cfg.HTTPAddr)
 
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}
 	}()
 
+	kitchenErr := make(chan error, 1)
+
+	go func() {
+		kitchenErr <- kitchen.Run(ctx)
+	}()
+
 	select {
 	case err := <-serverErr:
 		return err
+	case err := <-kitchenErr:
+		if err != nil {
+			return err
+		}
 	case <-ctx.Done():
 	}
 
@@ -67,16 +86,4 @@ func run() error {
 	defer cancel()
 
 	return srv.Shutdown(shutdownCtx)
-}
-
-func newRouter() http.Handler {
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.Recoverer)
-
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-
-	return r
 }
