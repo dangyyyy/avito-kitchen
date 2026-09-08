@@ -7,8 +7,10 @@ services:
       POSTGRES_USER: kitchen
       POSTGRES_PASSWORD: kitchen
       POSTGRES_DB: kitchen
+    # Mapped to 5433 on the host: 5432 is usually taken by a local PostgreSQL,
+    # and nothing in the stack needs the port from outside.
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
