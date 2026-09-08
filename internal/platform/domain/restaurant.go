@@ -52,6 +52,21 @@ type RestaurantFilter struct {
 	Offset   int
 }
 
+// MenuCategoryWithItems is the menu as a client renders it: categories in order,
+// each with its own positions.
+type MenuCategoryWithItems struct {
+	Category MenuCategory
+	Items    []MenuItem
+}
+
+// CartValidationResult is the outcome of a dry-run check. An invalid cart is a
+// normal answer, not a failure.
+type CartValidationResult struct {
+	Valid           bool
+	TotalPriceCents int64
+	Problems        []ItemProblem
+}
+
 // MenuItemSearchResult answers "who sells this dish", so it carries enough of the
 // restaurant to render a search hit without a second request.
 type MenuItemSearchResult struct {

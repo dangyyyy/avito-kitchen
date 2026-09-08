@@ -144,7 +144,7 @@ func placeInTx(ctx context.Context, tx pgx.Tx, in PlaceOrderInput) (domain.Order
 		return domain.Order{}, domain.ErrRestaurantClosed
 	}
 
-	locked, err := lockMenuItems(ctx, tx, in)
+	locked, err := fetchMenuItems(ctx, tx, in, true)
 	if err != nil {
 		return domain.Order{}, err
 	}
@@ -157,7 +157,11 @@ func placeInTx(ctx context.Context, tx pgx.Tx, in PlaceOrderInput) (domain.Order
 	return insertOrder(ctx, tx, in, items)
 }
 
-func lockMenuItems(ctx context.Context, tx pgx.Tx, in PlaceOrderInput) (map[uuid.UUID]lockedMenuItem, error) {
+// fetchMenuItems loads the referenced menu rows. With forUpdate it also locks
+// them for the rest of the transaction; the dry-run path reads without locking.
+func fetchMenuItems(
+	ctx context.Context, q querier, in PlaceOrderInput, forUpdate bool,
+) (map[uuid.UUID]lockedMenuItem, error) {
 	ids := make([]uuid.UUID, 0, len(in.Items))
 	for _, item := range in.Items {
 		ids = append(ids, item.MenuItemID)
@@ -165,14 +169,18 @@ func lockMenuItems(ctx context.Context, tx pgx.Tx, in PlaceOrderInput) (map[uuid
 
 	// ORDER BY id gives every transaction the same lock order, so two concurrent
 	// orders over overlapping items queue up instead of deadlocking.
-	rows, err := tx.Query(ctx, `
+	query := `
 		SELECT id, external_id, name, price_cents, is_available, is_active
 		FROM menu_items
 		WHERE restaurant_id = $1 AND id = ANY($2)
-		ORDER BY id
-		FOR UPDATE`, in.RestaurantID, ids)
+		ORDER BY id`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+
+	rows, err := q.Query(ctx, query, in.RestaurantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("lock menu items: %w", err)
+		return nil, fmt.Errorf("load menu items: %w", err)
 	}
 
 	type keyedItem struct {
@@ -197,6 +205,46 @@ func lockMenuItems(ctx context.Context, tx pgx.Tx, in PlaceOrderInput) (map[uuid
 	}
 
 	return locked, nil
+}
+
+// ValidateCart runs exactly the checks Place would run, but locks nothing and
+// writes nothing. Sharing buildOrderItems is the point: the dry-run cannot drift
+// away from what actually happens at checkout.
+func (repo *OrderRepository) ValidateCart(
+	ctx context.Context, in PlaceOrderInput,
+) (domain.CartValidationResult, error) {
+	if len(in.Items) == 0 {
+		return domain.CartValidationResult{}, domain.ErrEmptyOrder
+	}
+
+	var accepting bool
+
+	err := repo.pool.QueryRow(ctx,
+		`SELECT is_accepting_orders FROM restaurants WHERE id = $1`, in.RestaurantID).Scan(&accepting)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.CartValidationResult{}, fmt.Errorf("restaurant %s: %w", in.RestaurantID, domain.ErrNotFound)
+	}
+
+	if err != nil {
+		return domain.CartValidationResult{}, fmt.Errorf("load restaurant: %w", err)
+	}
+
+	if !accepting {
+		return domain.CartValidationResult{}, domain.ErrRestaurantClosed
+	}
+
+	found, err := fetchMenuItems(ctx, repo.pool, in, false)
+	if err != nil {
+		return domain.CartValidationResult{}, err
+	}
+
+	items, problems := buildOrderItems(in, found)
+
+	return domain.CartValidationResult{
+		Valid:           len(problems) == 0,
+		TotalPriceCents: domain.TotalCents(items),
+		Problems:        problems,
+	}, nil
 }
 
 func buildOrderItems(
