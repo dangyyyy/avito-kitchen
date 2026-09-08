@@ -33,6 +33,24 @@ type Kitchen struct {
 	mu           sync.Mutex
 	rejectNext   bool
 	rejectReason string
+	paused       bool
+}
+
+// SetPaused stops the venue from touching orders. A demo needs it: the kitchen
+// picks orders up within one poll interval, which would otherwise race with any
+// scenario that has to show an order before the restaurant reacts.
+func (k *Kitchen) SetPaused(paused bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	k.paused = paused
+}
+
+func (k *Kitchen) isPaused() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	return k.paused
 }
 
 func NewKitchen(client *partnerclient.ClientWithResponses, interval time.Duration) *Kitchen {
@@ -76,6 +94,10 @@ func (k *Kitchen) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if k.isPaused() {
+				continue
+			}
+
 			// Existing orders move first, so an order accepted on this tick waits
 			// until the next one before it starts cooking.
 			k.advanceInFlight(ctx)

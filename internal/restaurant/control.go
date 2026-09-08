@@ -75,6 +75,16 @@ func NewControlRouter(kitchen *Kitchen) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"is_accepting_orders": body.IsAcceptingOrders})
 	})
 
+	r.Post("/control/pause", func(w http.ResponseWriter, _ *http.Request) {
+		kitchen.SetPaused(true)
+		writeJSON(w, http.StatusOK, map[string]bool{"paused": true})
+	})
+
+	r.Post("/control/resume", func(w http.ResponseWriter, _ *http.Request) {
+		kitchen.SetPaused(false)
+		writeJSON(w, http.StatusOK, map[string]bool{"paused": false})
+	})
+
 	r.Post("/control/reject-next", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Reason string `json:"reason"`
