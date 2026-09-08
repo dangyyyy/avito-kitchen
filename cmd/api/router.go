@@ -14,6 +14,7 @@ import (
 	"github.com/dangyyyy/avito-kitchen/internal/platform/repository"
 	"github.com/dangyyyy/avito-kitchen/internal/platform/service"
 	"github.com/dangyyyy/avito-kitchen/internal/platform/transport/clientapi"
+	"github.com/dangyyyy/avito-kitchen/internal/platform/transport/partnerapi"
 )
 
 func newRouter(pool *pgxpool.Pool) http.Handler {
@@ -47,7 +48,37 @@ func newRouter(pool *pgxpool.Pool) http.Handler {
 		ErrorHandlerFunc: writeRequestError,
 	})
 
+	partnerService := service.NewPartnerService(
+		repository.NewRestaurantRepository(pool),
+		repository.NewMenuRepository(pool),
+		repository.NewOrderRepository(pool),
+	)
+
+	partnerStrict := partnerapi.NewStrictHandlerWithOptions(
+		partnerapi.NewServer(partnerService),
+		nil,
+		partnerapi.StrictHTTPServerOptions{
+			RequestErrorHandlerFunc:  writePartnerRequestError,
+			ResponseErrorHandlerFunc: writeInternalError,
+		},
+	)
+
+	// The authenticator is registered as a middleware here rather than inside the
+	// handlers, so every partner route is covered by construction.
+	partnerapi.HandlerWithOptions(partnerStrict, partnerapi.ChiServerOptions{
+		BaseRouter:       r,
+		Middlewares:      []partnerapi.MiddlewareFunc{partnerapi.Authenticator(partnerService)},
+		ErrorHandlerFunc: writePartnerRequestError,
+	})
+
 	return r
+}
+
+func writePartnerRequestError(w http.ResponseWriter, _ *http.Request, err error) {
+	writeJSON(w, http.StatusBadRequest, partnerapi.Error{
+		Code:    partnerapi.ErrorCodeBadRequest,
+		Message: err.Error(),
+	})
 }
 
 // writeRequestError answers malformed requests — a bad UUID in the path, a
